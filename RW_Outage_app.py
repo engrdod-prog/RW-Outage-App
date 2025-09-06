@@ -9,6 +9,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import time
+from io import BytesIO
+import base64
 warnings.filterwarnings('ignore')
 
 # Check for required dependencies
@@ -576,6 +578,193 @@ def load_custom_css():
     }
     </style>
     """, unsafe_allow_html=True)
+
+# ----------------------------
+# PDF Generation Functions
+# ----------------------------
+
+def create_pdf_report(df, summary_data, report_type="complete"):
+    """Create a PDF report with outage data and summaries."""
+    try:
+        from reportlab.lib.pagesizes import letter, A4
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib import colors
+        from reportlab.lib.units import inch
+        
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=72, leftMargin=72, topMargin=72, bottomMargin=18)
+        story = []
+        styles = getSampleStyleSheet()
+        
+        # Title
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=16,
+            spaceAfter=30,
+            alignment=1
+        )
+        story.append(Paragraph("📡 Transmitter Outage Monitoring Report", title_style))
+        story.append(Paragraph(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
+        story.append(Spacer(1, 20))
+        
+        if report_type == "ytd" and summary_data['ytd']:
+            # YTD Summary
+            story.append(Paragraph("Year-to-Date Performance Summary", styles['Heading2']))
+            ytd = summary_data['ytd']
+            ytd_data = [
+                ['Metric', 'Value'],
+                ['Current Year', str(ytd['current_year'])],
+                ['Days Elapsed', str(ytd['days_elapsed'])],
+                ['YTD Availability', f"{ytd['ytd_availability_%']:.2f}%"],
+                ['YTD Failures', str(ytd['failure_count'])],
+                ['YTD Downtime (Hours)', f"{ytd['total_downtime_minutes'] / 60:.1f}h"],
+                ['Avg Downtime per Failure', f"{ytd['avg_downtime_per_failure']:.1f} minutes"]
+            ]
+            ytd_table = Table(ytd_data)
+            ytd_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 12),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black)
+            ]))
+            story.append(ytd_table)
+            story.append(Spacer(1, 20))
+            
+        elif report_type == "latest_month" and not summary_data['monthly'].empty:
+            # Latest Month Performance
+            story.append(Paragraph("Latest Month Performance", styles['Heading2']))
+            latest_month = summary_data['monthly'].iloc[-1]
+            month_data = [
+                ['Metric', 'Value'],
+                ['Year', str(latest_month['Year'])],
+                ['Month', str(latest_month['Month'])],
+                ['Availability', f"{latest_month['Availability_%']:.2f}%"],
+                ['Total Failures', str(int(latest_month['Failure_Count']))],
+                ['Total Downtime (Hours)', f"{latest_month['Total_Downtime_Minutes'] / 60:.1f}h"],
+                ['Avg Downtime per Failure', f"{latest_month['Avg_Downtime_Per_Failure']:.1f} minutes"]
+            ]
+            month_table = Table(month_data)
+            month_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black)
+            ]))
+            story.append(month_table)
+            story.append(Spacer(1, 20))
+        
+        # Raw Data Summary
+        if not df.empty:
+            story.append(Paragraph("Data Summary", styles['Heading2']))
+            summary_data_table = [
+                ['Metric', 'Value'],
+                ['Total Records', str(len(df))],
+                ['Date Range', f"{df['Date'].min().strftime('%Y-%m-%d')} to {df['Date'].max().strftime('%Y-%m-%d')}"],
+                ['Total Downtime (Hours)', f"{df['Downtime (minutes)'].sum() / 60:.1f}h"],
+                ['Average Downtime (Minutes)', f"{df['Downtime (minutes)'].mean():.1f}"]
+            ]
+            
+            # Add failure type counts
+            failure_counts = df['Failure Type'].value_counts()
+            for failure_type, count in failure_counts.items():
+                summary_data_table.append([f"{failure_type} Failures", str(count)])
+            
+            summary_table = Table(summary_data_table)
+            summary_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black)
+            ]))
+            story.append(summary_table)
+            story.append(Spacer(1, 20))
+        
+        # Outages Table
+        if not df.empty:
+            if report_type == "complete":
+                # For complete report, show all outages
+                story.append(Paragraph("All Outage Records", styles['Heading2']))
+                outages_df = df.copy()
+            elif report_type == "ytd":
+                # For YTD report, show all outages
+                story.append(Paragraph("All Outage Records", styles['Heading2']))
+                outages_df = df.copy()
+            elif report_type == "latest_month" and not summary_data['monthly'].empty:
+                # For latest month report, show all outages from that month
+                latest_month = summary_data['monthly'].iloc[-1]
+                latest_year = latest_month['Year']
+                latest_month_name = latest_month['Month']
+                
+                # Filter outages for the latest month
+                outages_df = df[
+                    (df['Date'].dt.year == latest_year) & 
+                    (df['Date'].dt.strftime('%B') == latest_month_name)
+                ].copy()
+                
+                story.append(Paragraph(f"All Outages from {latest_month_name} {latest_year}", styles['Heading2']))
+            else:
+                # Fallback: show recent outages (last 10 records)
+                story.append(Paragraph("Recent Outages (Last 10 Records)", styles['Heading2']))
+                outages_df = df.head(10).copy()
+            
+            outages_df['Date'] = outages_df['Date'].dt.strftime('%Y-%m-%d')
+            
+            # Prepare data for table
+            table_data = [['Date', 'Start Time', 'End Time', 'Failure Type', 'Downtime', 'Remarks']]
+            for _, row in outages_df.iterrows():
+                # Truncate remarks if too long for PDF
+                remarks = str(row['Remarks'])[:50] + "..." if len(str(row['Remarks'])) > 50 else str(row['Remarks'])
+                table_data.append([
+                    str(row['Date']),
+                    str(row['Start Time']),
+                    str(row['End Time']),
+                    str(row['Failure Type']),
+                    str(row['Downtime (hh:mm)']),
+                    remarks
+                ])
+            
+            outages_table = Table(table_data)
+            outages_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 7 if report_type in ["complete", "ytd", "latest_month"] else 8),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP')
+            ]))
+            story.append(outages_table)
+            
+            # Add page break for reports with many records
+            if report_type in ["complete", "ytd", "latest_month"] and len(outages_df) > 20:
+                story.append(PageBreak())
+        
+        doc.build(story)
+        buffer.seek(0)
+        return buffer.getvalue()
+        
+    except ImportError:
+        st.error("PDF generation requires reportlab. Please install it: pip install reportlab")
+        return None
+    except Exception as e:
+        st.error(f"Error creating PDF: {str(e)}")
+        return None
 
 # ----------------------------
 # Authentication System
@@ -1228,37 +1417,151 @@ elif menu == "📤 Data Export":
         with col1:
             st.markdown("### 📊 Export Options")
             
-            # Raw Data Export
-            st.markdown("#### 📋 Raw Data")
-            csv_data = df.to_csv(index=False)
-            st.download_button(
-                label="📥 Download CSV",
-                data=csv_data,
-                file_name=f"outage_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv"
-            )
-            
-            # Summary Data Export
-            st.markdown("#### 📈 Summary Data")
+            # Summary Data
             summary_data = build_comprehensive_summary(df)
             
-            if not summary_data['monthly'].empty:
-                monthly_csv = summary_data['monthly'].to_csv(index=False)
-                st.download_button(
-                    label="📥 Download Monthly Summary",
-                    data=monthly_csv,
-                    file_name=f"monthly_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv"
-                )
+            # PDF Export Options
+            st.markdown("#### 📄 PDF Reports")
             
-            if not summary_data['yearly'].empty:
-                yearly_csv = summary_data['yearly'].to_csv(index=False)
+            # YTD Summary PDF
+            if summary_data['ytd']:
+                try:
+                    pdf_data = create_pdf_report(df, summary_data, "ytd")
+                    if pdf_data:
+                        st.download_button(
+                            label="📥 Download YTD Summary (PDF)",
+                            data=pdf_data,
+                            file_name=f"ytd_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                            mime="application/pdf"
+                        )
+                except Exception as e:
+                    st.error(f"Error creating YTD PDF: {str(e)}")
+            
+            # Latest Month Performance PDF
+            if not summary_data['monthly'].empty:
+                try:
+                    pdf_data = create_pdf_report(df, summary_data, "latest_month")
+                    if pdf_data:
+                        st.download_button(
+                            label="📥 Download Latest Month Performance (PDF)",
+                            data=pdf_data,
+                            file_name=f"latest_month_performance_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                            mime="application/pdf"
+                        )
+                except Exception as e:
+                    st.error(f"Error creating Latest Month PDF: {str(e)}")
+            
+            # Complete Report PDF
+            try:
+                pdf_data = create_pdf_report(df, summary_data, "complete")
+                if pdf_data:
+                    st.download_button(
+                        label="📥 Download Complete Report (PDF)",
+                        data=pdf_data,
+                        file_name=f"complete_outage_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                        mime="application/pdf"
+                    )
+            except Exception as e:
+                st.error(f"Error creating Complete PDF: {str(e)}")
+            
+            # Excel Export Options
+            st.markdown("#### 📊 Excel Reports")
+            
+            # Year-to-Date Summary Excel
+            if summary_data['ytd']:
+                try:
+                    # Create Excel file with YTD summary
+                    output = BytesIO()
+                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                        # YTD Summary Sheet
+                        ytd_df = pd.DataFrame([summary_data['ytd']])
+                        ytd_df.to_excel(writer, sheet_name='YTD_Summary', index=False)
+                        
+                        # All outage records sheet (matching PDF)
+                        df_formatted = df.copy()
+                        df_formatted['Date'] = df_formatted['Date'].dt.strftime('%Y-%m-%d')
+                        df_formatted.to_excel(writer, sheet_name='All_Outage_Records', index=False)
+                    
+                    output.seek(0)
+                    st.download_button(
+                        label="📥 Download YTD Summary (Excel)",
+                        data=output.getvalue(),
+                        file_name=f"ytd_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                except Exception as e:
+                    st.error(f"Error creating YTD Excel file: {str(e)}")
+            
+            # Latest Month Performance Excel
+            if not summary_data['monthly'].empty:
+                try:
+                    # Get latest month data
+                    latest_month = summary_data['monthly'].iloc[-1]
+                    latest_month_df = pd.DataFrame([latest_month])
+                    latest_year = latest_month['Year']
+                    latest_month_name = latest_month['Month']
+                    
+                    # Filter outages for the latest month (matching PDF)
+                    latest_month_outages = df[
+                        (df['Date'].dt.year == latest_year) & 
+                        (df['Date'].dt.strftime('%B') == latest_month_name)
+                    ].copy()
+                    
+                    # Create Excel file with latest month performance
+                    output = BytesIO()
+                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                        # Latest Month Performance Sheet
+                        latest_month_df.to_excel(writer, sheet_name='Latest_Month', index=False)
+                        
+                        # All outages from latest month sheet (matching PDF)
+                        latest_month_outages_formatted = latest_month_outages.copy()
+                        latest_month_outages_formatted['Date'] = latest_month_outages_formatted['Date'].dt.strftime('%Y-%m-%d')
+                        latest_month_outages_formatted.to_excel(writer, sheet_name=f'Outages_{latest_month_name}_{latest_year}', index=False)
+                        
+                        # Monthly trend sheet
+                        summary_data['monthly'].to_excel(writer, sheet_name='Monthly_Trend', index=False)
+                    
+                    output.seek(0)
+                    st.download_button(
+                        label="📥 Download Latest Month Performance (Excel)",
+                        data=output.getvalue(),
+                        file_name=f"latest_month_performance_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                except Exception as e:
+                    st.error(f"Error creating Latest Month Excel file: {str(e)}")
+            
+            # Comprehensive Excel Report
+            try:
+                output = BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    # All outage records (matching PDF)
+                    df_formatted = df.copy()
+                    df_formatted['Date'] = df_formatted['Date'].dt.strftime('%Y-%m-%d')
+                    df_formatted.to_excel(writer, sheet_name='All_Outage_Records', index=False)
+                    
+                    # Monthly summary
+                    if not summary_data['monthly'].empty:
+                        summary_data['monthly'].to_excel(writer, sheet_name='Monthly_Summary', index=False)
+                    
+                    # Yearly summary
+                    if not summary_data['yearly'].empty:
+                        summary_data['yearly'].to_excel(writer, sheet_name='Yearly_Summary', index=False)
+                    
+                    # YTD summary
+                    if summary_data['ytd']:
+                        ytd_df = pd.DataFrame([summary_data['ytd']])
+                        ytd_df.to_excel(writer, sheet_name='YTD_Summary', index=False)
+                
+                output.seek(0)
                 st.download_button(
-                    label="📥 Download Yearly Summary",
-                    data=yearly_csv,
-                    file_name=f"yearly_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv"
+                    label="📥 Download Complete Report (Excel)",
+                    data=output.getvalue(),
+                    file_name=f"complete_outage_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
+            except Exception as e:
+                st.error(f"Error creating complete Excel report: {str(e)}")
         
         with col2:
             st.markdown("### 📊 Data Statistics")
