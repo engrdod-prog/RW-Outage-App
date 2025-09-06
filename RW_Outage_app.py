@@ -575,6 +575,40 @@ def load_custom_css():
     """, unsafe_allow_html=True)
 
 # ----------------------------
+# Authentication System
+# ----------------------------
+
+def check_password():
+    """Returns `True` if the user had the correct password."""
+    
+    def password_entered():
+        """Checks whether a password entered by the user is correct."""
+        if st.session_state["password"] == "rwtech":
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # don't store password
+        else:
+            st.session_state["password_correct"] = False
+
+    # Return True if the password is validated initially.
+    if st.session_state.get("password_correct", False):
+        return True
+
+    # Show input for password.
+    st.markdown("""
+    <div style="text-align: center; padding: 2rem;">
+        <h1>🔐 Access Control</h1>
+        <p>Please enter the password to access the Transmitter Outage Monitoring System</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.text_input(
+        "Password", type="password", on_change=password_entered, key="password"
+    )
+    if "password_correct" in st.session_state:
+        st.error("😕 Password incorrect")
+    return False
+
+# ----------------------------
 # Streamlit UI
 # ----------------------------
 
@@ -592,6 +626,10 @@ st.set_page_config(
 
 # Load custom CSS
 load_custom_css()
+
+# Check password before showing the main application
+if not check_password():
+    st.stop()  # Do not continue if check_password is not True.
 
 # Modern header with gradient background
 st.markdown("""
