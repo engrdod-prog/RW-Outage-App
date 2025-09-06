@@ -1211,60 +1211,42 @@ elif menu == "📊 View Summary":
                 )
             st.markdown("---")
         
-        # Latest Month Performance
+        # Month to Date Performance
         if not monthly_summary.empty:
-            st.markdown("#### 📅 Latest Month Performance")
+            st.markdown("#### 📅 Month to Date Performance")
             latest_month = monthly_summary.iloc[-1]
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.metric("Latest Month Availability", f"{latest_month['Availability_%']:.2f}%", 
+                st.metric("Month to Date Availability", f"{latest_month['Availability_%']:.2f}%", 
                          delta=f"{latest_month['Availability_%'] - 99:.2f}%" if latest_month['Availability_%'] != 99 else None)
             with col2:
-                st.metric("Latest Month Failures", int(latest_month['Failure_Count']))
+                st.metric("Month to Date Failures", int(latest_month['Failure_Count']))
             with col3:
-                st.metric("Latest Month Downtime", f"{latest_month['Total_Downtime_Minutes'] / 60:.1f}h")
+                st.metric("Month to Date Downtime", f"{latest_month['Total_Downtime_Minutes'] / 60:.1f}h")
         
         # Monthly Summary
         st.markdown("### 📅 Monthly Summary")
         if not monthly_summary.empty:
-            # Format the dataframe for better display
+            # Show all monthly data
+            st.markdown("#### 📊 All Monthly Data")
             display_monthly = monthly_summary.copy()
             display_monthly['Availability_%'] = display_monthly['Availability_%'].round(2)
             display_monthly['Total_Downtime_Minutes'] = display_monthly['Total_Downtime_Minutes'].astype(int)
+            display_monthly['Total_Downtime_Hours'] = (display_monthly['Total_Downtime_Minutes'] / 60).round(1)
             
             st.dataframe(display_monthly, use_container_width=True)
             
-            # Interactive Charts
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("#### 📈 Availability Trend")
-                availability_chart = create_availability_chart(monthly_summary)
-                if availability_chart:
-                    st.plotly_chart(availability_chart, use_container_width=True)
-                else:
-                    st.info("No data available for availability chart")
+            # Add monthly trend chart
+            st.markdown("#### 📈 Monthly Availability Trend")
+            monthly_chart = create_availability_chart(monthly_summary)
+            if monthly_chart:
+                st.plotly_chart(monthly_chart, use_container_width=True)
+            else:
+                st.info("No monthly trend data available for charting.")
             
-            with col2:
-                st.markdown("#### 📊 Failure Count Trend")
-                failure_trend_fig = go.Figure()
-                failure_trend_fig.add_trace(go.Bar(
-                    x=monthly_summary['Month'],
-                    y=monthly_summary['Failure_Count'],
-                    name='Failure Count',
-                    marker_color='#ff7f0e',
-                    hovertemplate='<b>%{x}</b><br>Failures: %{y}<extra></extra>'
-                ))
-                failure_trend_fig.update_layout(
-                    title="Monthly Failure Count",
-                    xaxis_title="Month",
-                    yaxis_title="Failure Count",
-                    template='plotly_white',
-                    height=400,
-                    showlegend=False
-                )
-                st.plotly_chart(failure_trend_fig, use_container_width=True)
+                
         else:
-            st.info("No monthly data available for the selected filters.")
+            st.info("No monthly data available.")
         
         # Yearly Summary
         st.markdown("### 📆 Yearly Summary")
@@ -1420,50 +1402,6 @@ elif menu == "📤 Data Export":
             # Summary Data
             summary_data = build_comprehensive_summary(df)
             
-            # PDF Export Options
-            st.markdown("#### 📄 PDF Reports")
-            
-            # YTD Summary PDF
-            if summary_data['ytd']:
-                try:
-                    pdf_data = create_pdf_report(df, summary_data, "ytd")
-                    if pdf_data:
-                        st.download_button(
-                            label="📥 Download YTD Summary (PDF)",
-                            data=pdf_data,
-                            file_name=f"ytd_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
-                            mime="application/pdf"
-                        )
-                except Exception as e:
-                    st.error(f"Error creating YTD PDF: {str(e)}")
-            
-            # Latest Month Performance PDF
-            if not summary_data['monthly'].empty:
-                try:
-                    pdf_data = create_pdf_report(df, summary_data, "latest_month")
-                    if pdf_data:
-                        st.download_button(
-                            label="📥 Download Latest Month Performance (PDF)",
-                            data=pdf_data,
-                            file_name=f"latest_month_performance_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
-                            mime="application/pdf"
-                        )
-                except Exception as e:
-                    st.error(f"Error creating Latest Month PDF: {str(e)}")
-            
-            # Complete Report PDF
-            try:
-                pdf_data = create_pdf_report(df, summary_data, "complete")
-                if pdf_data:
-                    st.download_button(
-                        label="📥 Download Complete Report (PDF)",
-                        data=pdf_data,
-                        file_name=f"complete_outage_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
-                        mime="application/pdf"
-                    )
-            except Exception as e:
-                st.error(f"Error creating Complete PDF: {str(e)}")
-            
             # Excel Export Options
             st.markdown("#### 📊 Excel Reports")
             
@@ -1562,6 +1500,74 @@ elif menu == "📤 Data Export":
                 )
             except Exception as e:
                 st.error(f"Error creating complete Excel report: {str(e)}")
+            
+            # CSV Export Options
+            st.markdown("#### 📄 CSV Reports")
+            
+            # YTD Summary CSV
+            if summary_data['ytd']:
+                try:
+                    # Create CSV with YTD summary and all records
+                    ytd_df = pd.DataFrame([summary_data['ytd']])
+                    df_formatted = df.copy()
+                    df_formatted['Date'] = df_formatted['Date'].dt.strftime('%Y-%m-%d')
+                    
+                    # Combine YTD summary and all records
+                    combined_data = pd.concat([ytd_df, df_formatted], ignore_index=True)
+                    csv_data = combined_data.to_csv(index=False)
+                    
+                    st.download_button(
+                        label="📥 Download YTD Summary (CSV)",
+                        data=csv_data,
+                        file_name=f"ytd_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv"
+                    )
+                except Exception as e:
+                    st.error(f"Error creating YTD CSV: {str(e)}")
+            
+            # Month to Date Performance CSV
+            if not summary_data['monthly'].empty:
+                try:
+                    # Get latest month data
+                    latest_month = summary_data['monthly'].iloc[-1]
+                    latest_month_df = pd.DataFrame([latest_month])
+                    latest_year = latest_month['Year']
+                    latest_month_name = latest_month['Month']
+                    
+                    # Filter outages for the latest month
+                    latest_month_outages = df[
+                        (df['Date'].dt.year == latest_year) & 
+                        (df['Date'].dt.strftime('%B') == latest_month_name)
+                    ].copy()
+                    latest_month_outages['Date'] = latest_month_outages['Date'].dt.strftime('%Y-%m-%d')
+                    
+                    # Combine month summary and month outages
+                    combined_data = pd.concat([latest_month_df, latest_month_outages], ignore_index=True)
+                    csv_data = combined_data.to_csv(index=False)
+                    
+                    st.download_button(
+                        label="📥 Download Month to Date Performance (CSV)",
+                        data=csv_data,
+                        file_name=f"month_to_date_performance_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv"
+                    )
+                except Exception as e:
+                    st.error(f"Error creating Month to Date CSV: {str(e)}")
+            
+            # Complete Report CSV
+            try:
+                df_formatted = df.copy()
+                df_formatted['Date'] = df_formatted['Date'].dt.strftime('%Y-%m-%d')
+                csv_data = df_formatted.to_csv(index=False)
+                
+                st.download_button(
+                    label="📥 Download Complete Report (CSV)",
+                    data=csv_data,
+                    file_name=f"complete_outage_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv"
+                )
+            except Exception as e:
+                st.error(f"Error creating Complete CSV: {str(e)}")
         
         with col2:
             st.markdown("### 📊 Data Statistics")
