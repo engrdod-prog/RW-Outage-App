@@ -725,7 +725,10 @@ if menu == "📝 Log Outage":
         if not recent_outages.empty:
             # Show last 10 records from the filtered data
             recent_outages = recent_outages.tail(10)
-            st.dataframe(recent_outages, use_container_width=True)
+            # Format the Date column to show only date
+            recent_outages_display = recent_outages.copy()
+            recent_outages_display['Date'] = recent_outages_display['Date'].dt.strftime('%Y-%m-%d')
+            st.dataframe(recent_outages_display, use_container_width=True)
         else:
             st.info("No outages recorded in the last 3 months.")
         st.markdown("---")
@@ -839,9 +842,11 @@ elif menu == "✏️ Edit Records":
         
         st.markdown(f"**Total Records:** {len(filtered_df)} (Filtered from {len(df)} total)")
         
-        # Enhanced dataframe display
+        # Enhanced dataframe display with formatted date
+        filtered_df_display = filtered_df.copy()
+        filtered_df_display['Date'] = filtered_df_display['Date'].dt.strftime('%Y-%m-%d')
         st.dataframe(
-            filtered_df, 
+            filtered_df_display, 
             use_container_width=True,
             hide_index=True
         )
