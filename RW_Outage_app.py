@@ -8,6 +8,7 @@ import warnings
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import time
 warnings.filterwarnings('ignore')
 
 # Check for required dependencies
@@ -109,6 +110,8 @@ def load_data():
             df = pd.read_excel(EXCEL_FILE, sheet_name=SHEET_NAME)
             # Ensure proper data types
             df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+            # Sort by date in descending order (newest first)
+            df = df.sort_values('Date', ascending=False).reset_index(drop=True)
             return df
         except FileNotFoundError:
             st.error(f"Excel file '{EXCEL_FILE}' not found.")
@@ -583,7 +586,7 @@ def check_password():
     
     def password_entered():
         """Checks whether a password entered by the user is correct."""
-        if st.session_state["password"] == "rwtech":
+        if st.session_state["password"] == "technical":
             st.session_state["password_correct"] = True
             del st.session_state["password"]  # don't store password
         else:
@@ -638,6 +641,8 @@ st.markdown("""
     <p>Advanced outage tracking and reliability analysis for broadcast operations</p>
 </div>
 """, unsafe_allow_html=True)
+
+
 
 # Enhanced sidebar with better styling
 st.sidebar.markdown("### 🎛️ Control Panel")
@@ -710,14 +715,22 @@ if menu in ["✏️ Edit Records", "📊 View Summary", "📈 Analytics Dashboar
 if menu == "📝 Log Outage":
     st.subheader("➕ Log a new outage")
     
-    # Show recent outages for reference
+    # Show recent outages for reference (last 3 months)
     if not df.empty:
-        st.markdown("### 📋 Recent Outages")
-        recent_outages = df.tail(5)[['Date', 'Start Time', 'End Time', 'Failure Type', 'Downtime (hh:mm)']]
-        st.dataframe(recent_outages, use_container_width=True)
+        st.markdown("### 📋 Recent Outages (Last 3 Months)")
+        # Filter to last 3 months
+        three_months_ago = datetime.now() - timedelta(days=90)
+        recent_outages = df[df['Date'] >= three_months_ago][['Date', 'Start Time', 'End Time', 'Failure Type', 'Downtime (hh:mm)']]
+        
+        if not recent_outages.empty:
+            # Show last 10 records from the filtered data
+            recent_outages = recent_outages.tail(10)
+            st.dataframe(recent_outages, use_container_width=True)
+        else:
+            st.info("No outages recorded in the last 3 months.")
         st.markdown("---")
 
-    with st.form("log_form", clear_on_submit=True):
+    with st.form("log_form", clear_on_submit=False):
         st.markdown("### 📝 Outage Details")
         
         col1, col2 = st.columns(2)
@@ -774,15 +787,15 @@ if menu == "📝 Log Outage":
             # Validate inputs
             required_valid, required_msg = validate_required_fields(date, start_time, end_time, failure_type)
             if not required_valid:
-                st.error(f"❌ {required_msg}")
+                st.error(f"Validation Error: {required_msg}")
             else:
                 time_valid, time_msg = validate_time_input(start_time, end_time, date)
                 if not time_valid:
-                    st.error(f"❌ {time_msg}")
+                    st.error(f"Validation Error: {time_msg}")
                 else:
                     # Check for duplicates
                     if check_duplicate_entry(df, date, start_time, end_time):
-                        st.error("❌ An outage entry already exists for this date and time period!")
+                        st.error("Duplicate Entry: An outage record already exists for this date and time period.")
                     else:
                         # Create new record
                         new_record = {
@@ -799,12 +812,14 @@ if menu == "📝 Log Outage":
                         with st.spinner("💾 Saving outage data..."):
                             df = pd.concat([df, pd.DataFrame([new_record])], ignore_index=True)
                             if save_data(df):
-                                st.success(f"✅ Outage logged successfully! Downtime: {downtime_str}")
-                                st.balloons()
-                                # Auto-refresh the page to show updated data
+                                st.success("New outage record has been created successfully.")
+                                # Clear cache and refresh data
+                                load_data.clear()
+                                # Add a delay to show the message before refresh
+                                time.sleep(2)
                                 st.rerun()
                             else:
-                                st.error("❌ Failed to save outage. Please try again.")
+                                st.error("Unable to save outage record. Please verify your input and try again.")
 
 # ----------------------------
 # Edit Records Page
@@ -893,11 +908,11 @@ elif menu == "✏️ Edit Records":
                         # Validate inputs
                         required_valid, required_msg = validate_required_fields(date, start_time, end_time, failure_type)
                         if not required_valid:
-                            st.error(f"❌ {required_msg}")
+                            st.error(f"Validation Error: {required_msg}")
                         else:
                             time_valid, time_msg = validate_time_input(start_time, end_time, date)
                             if not time_valid:
-                                st.error(f"❌ {time_msg}")
+                                st.error(f"Validation Error: {time_msg}")
                             else:
                                 start_dt = datetime.combine(date, start_time)
                                 end_dt = datetime.combine(date, end_time)
@@ -907,17 +922,29 @@ elif menu == "✏️ Edit Records":
 
                                 # Find the actual index in the original dataframe
                                 actual_index = df.index[df.index == filtered_df.index[record_index]].tolist()[0]
-                                df.loc[actual_index] = [date, start_time, end_time, downtime_minutes, downtime_str, failure_type, remarks]
+                                
+                                # Update the record with correct field mapping
+                                df.loc[actual_index, 'Date'] = date
+                                df.loc[actual_index, 'Start Time'] = start_time
+                                df.loc[actual_index, 'End Time'] = end_time
+                                df.loc[actual_index, 'Downtime (minutes)'] = downtime_minutes
+                                df.loc[actual_index, 'Downtime (hh:mm)'] = downtime_str
+                                df.loc[actual_index, 'Failure Type'] = failure_type
+                                df.loc[actual_index, 'Remarks'] = remarks
                                 
                                 if save_data(df):
-                                    st.success(f"✅ Record updated successfully! Downtime: {downtime_str}")
-                                    st.balloons()
+                                    st.success("Record has been updated successfully.")
+                                    # Clear cache and refresh data
+                                    load_data.clear()
+                                    # Add a delay to show the message before refresh
+                                    time.sleep(2)
+                                    st.rerun()
                                 else:
-                                    st.error("❌ Failed to update record. Please try again.")
+                                    st.error("Unable to update record. Please check your input and try again.")
 
             elif action == "Delete":
                 st.markdown("### 🗑️ Delete Record")
-                st.warning("⚠️ This action cannot be undone!")
+                st.warning("Are you sure you want to delete this record? This action cannot be undone.")
                 
                 if st.button("🗑️ Confirm Delete", type="primary"):
                     # Find the actual index in the original dataframe
@@ -925,10 +952,14 @@ elif menu == "✏️ Edit Records":
                     df = df.drop(actual_index).reset_index(drop=True)
                     
                     if save_data(df):
-                        st.success("✅ Record deleted successfully!")
+                        st.success("Record has been deleted successfully.")
+                        # Clear cache and refresh data
+                        load_data.clear()
+                        # Add a delay to show the message before refresh
+                        time.sleep(2)
                         st.rerun()
                     else:
-                        st.error("❌ Failed to delete record. Please try again.")
+                        st.error("Unable to delete record. Please try again.")
 
 # ----------------------------
 # View Summary Page
@@ -1245,3 +1276,4 @@ elif menu == "📤 Data Export":
             failure_counts = df['Failure Type'].value_counts()
             for failure_type, count in failure_counts.items():
                 st.write(f"• **{failure_type}**: {count} occurrences")
+
